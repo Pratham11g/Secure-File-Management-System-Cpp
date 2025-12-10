@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <map>
+#include <limits>
 
 using namespace std;
 
@@ -17,7 +18,7 @@ string xorEncryptDecrypt(const string &data, const string &key = "MySecretKey123
     return out;
 }
 
-/* ---------------- SIMPLE HASH (Not real SHA, but ok for assignment) ---------------- */
+/* ---------------- SIMPLE HASH (Not real SHA, but fine for assignment) ---------------- */
 string simpleHash(const string &data) {
     unsigned long hash = 5381;
     for (char c : data)
@@ -25,9 +26,49 @@ string simpleHash(const string &data) {
     return to_string(hash);
 }
 
+/* ---------------- THREAT DETECTION: Malware + Buffer Overflow ---------------- */
+
+// Very simple malware detection based on patterns + fake hash blacklist
+bool isMalware(const string &content) {
+    // Signature-based patterns (for demo)
+    static vector<string> badPatterns = {
+        "virus", "malware", "trojan", "worm", "ransom"
+    };
+
+    for (const auto &pat : badPatterns) {
+        if (content.find(pat) != string::npos) {
+            return true;
+        }
+    }
+
+    // Hash-based blacklist (example hashes)
+    static vector<string> badHashes = {
+        "123456789", "999999999", "111111111" // fake bad hashes for demo
+    };
+
+    string h = simpleHash(content);
+    for (const auto &bh : badHashes) {
+        if (h == bh) return true;
+    }
+
+    return false;
+}
+
+// Simulated buffer overflow detection: reject abnormally large input
+bool isBufferOverflowAttempt(const string &filename, const string &content) {
+    const size_t MAX_FILENAME_LEN = 100;   // arbitrary safe limits
+    const size_t MAX_CONTENT_LEN  = 2000;
+
+    if (filename.size() > MAX_FILENAME_LEN) return true;
+    if (content.size()  > MAX_CONTENT_LEN)  return true;
+
+    return false;
+}
+
 /* ---------------- TWO-FACTOR AUTH: Simple OTP ---------------- */
 string generateOTP() {
-    srand(time(NULL));
+    // For demo: simple 6-digit random OTP
+    srand((unsigned)time(NULL));
     int code = 100000 + rand() % 900000;
     return to_string(code);
 }
@@ -49,7 +90,7 @@ struct FileInfo {
     vector<string> sharedUsers;
 };
 
-/* ---------------- DATABASE SIMULATION (Maps) ---------------- */
+/* ---------------- DATABASE SIMULATION (Maps in memory) ---------------- */
 map<string, User> userDB;
 map<int, FileInfo> fileDB;
 int fileCounter = 1;
@@ -115,20 +156,34 @@ void enable2FA(const string &username) {
     cout << "Two-factor authentication enabled!\n";
 }
 
-/* ---------------- UPLOAD FILE ---------------- */
+/* ---------------- UPLOAD FILE (WRITE) ---------------- */
 void uploadFile(const string &username) {
     string filename, content;
     cout << "Enter file name: ";
     cin >> filename;
     cout << "Enter content: ";
-    cin.ignore();
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
     getline(cin, content);
+
+    // Threat detection: buffer overflow attempt
+    if (isBufferOverflowAttempt(filename, content)) {
+        cout << "Upload blocked: input too large (possible buffer overflow attempt)!\n";
+        return;
+    }
+
+    // Threat detection: malware
+    if (isMalware(content)) {
+        cout << "Upload blocked: malware detected in file content!\n";
+        return;
+    }
 
     FileInfo file;
     file.owner = username;
     file.filename = filename;
     file.encryptedContent = xorEncryptDecrypt(content);
-    file.metadata = "Owner: " + username + ", Size: " + to_string(content.size()) + " bytes";
+    file.metadata = "Owner: " + username +
+                    ", Size: " + to_string(content.size()) +
+                    " bytes, Hash: " + simpleHash(content);
 
     fileDB[fileCounter] = file;
 
@@ -140,7 +195,12 @@ void uploadFile(const string &username) {
 void readFile(const string &username) {
     int id;
     cout << "Enter file ID: ";
-    cin >> id;
+    if (!(cin >> id)) {
+        cout << "Invalid input!\n";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        return;
+    }
 
     if (!fileDB.count(id)) {
         cout << "File not found!\n";
@@ -169,14 +229,20 @@ void shareFile(const string &username) {
     int id;
     string target;
     cout << "Enter file ID to share: ";
-    cin >> id;
+    if (!(cin >> id)) {
+        cout << "Invalid input!\n";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        return;
+    }
+
     cout << "Enter username to share with: ";
     cin >> target;
 
     if (!fileDB.count(id)) {
         cout << "File not found!\n";
         return;
-    }5
+    }
 
     if (!userDB.count(target)) {
         cout << "Target user does not exist!\n";
@@ -197,7 +263,12 @@ void shareFile(const string &username) {
 void viewMetadata() {
     int id;
     cout << "Enter file ID: ";
-    cin >> id;
+    if (!(cin >> id)) {
+        cout << "Invalid input!\n";
+        cin.clear();
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        return;
+    }
 
     if (!fileDB.count(id)) {
         cout << "File not found!\n";
@@ -216,23 +287,49 @@ int main() {
         if (currentUser == "") {
             cout << "1. Register\n2. Login\n3. Exit\nChoice: ";
             int choice;
-            cin >> choice;
+            if (!(cin >> choice)) {
+                cout << "Invalid input. Exiting...\n";
+                break;
+            }
 
-            if (choice == 1) registerUser();
-            else if (choice == 2) currentUser = loginUser();
-            else break;
+            if (choice == 1) {
+                registerUser();
+            } else if (choice == 2) {
+                currentUser = loginUser();
+            } else if (choice == 3) {
+                cout << "Exiting...\n";
+                break;
+            } else {
+                cout << "Invalid choice!\n";
+            }
         } else {
             cout << "\nLogged in as: " << currentUser << endl;
             cout << "1. Enable 2FA\n2. Upload File\n3. Read File\n4. Share File\n5. View Metadata\n6. Logout\nChoice: ";
             int choice;
-            cin >> choice;
+            if (!(cin >> choice)) {
+                cout << "Invalid input. Logging out...\n";
+                cin.clear();
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                currentUser.clear();
+                continue;
+            }
 
-            if (choice == 1) enable2FA(currentUser);
-            else if (choice == 2) uploadFile(currentUser);
-            else if (choice == 3) readFile(currentUser);
-            else if (choice == 4) shareFile(currentUser);
-            else if (choice == 5) viewMetadata();
-            else if (choice == 6) currentUser = "";
+            if (choice == 1) {
+                enable2FA(currentUser);
+            } else if (choice == 2) {
+                uploadFile(currentUser);
+            } else if (choice == 3) {
+                readFile(currentUser);
+            } else if (choice == 4) {
+                shareFile(currentUser);
+            } else if (choice == 5) {
+                viewMetadata();
+            } else if (choice == 6) {
+                currentUser.clear();
+                cout << "Logged out.\n";
+            } else {
+                cout << "Invalid choice!\n";
+            }
         }
     }
 
